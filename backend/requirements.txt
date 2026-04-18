@@ -4,6 +4,7 @@ python-multipart==0.0.12
 espnet==202402
 espnet_model_zoo==0.1.7
 torch>=2.0.0
+torchaudio>=2.0.0
 soundfile==0.12.1
 numpy<2.0
 scipy<1.13
