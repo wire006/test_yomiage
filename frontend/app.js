@@ -28,6 +28,33 @@
   let audioCtx = null;
   let gainNode = null;
 
+  const PREFS_KEY = "yomiage.prefs.v1";
+  const DEFAULT_PREFS = {
+    engine: "voicevox",
+    voiceName: "冥鳴ひまり / ノーマル",
+  };
+
+  const loadPrefs = () => {
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (!raw) return { ...DEFAULT_PREFS };
+      return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+    } catch {
+      return { ...DEFAULT_PREFS };
+    }
+  };
+
+  const savePrefs = (patch) => {
+    try {
+      const next = { ...loadPrefs(), ...patch };
+      localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  let prefs = loadPrefs();
+
   // streamState: {
   //   sessionId, total, durations[], ready[], done, error,
   //   currentIdx, baseTime, loadingIdx, pollTimer, preloadedIdx
@@ -187,8 +214,10 @@
         opt.disabled = !e.available;
         engineSelect.appendChild(opt);
       }
+      const saved = engines.find((e) => e.id === prefs.engine && e.available);
       const firstAvailable = engines.find((e) => e.available);
-      if (firstAvailable) engineSelect.value = firstAvailable.id;
+      const picked = saved || firstAvailable;
+      if (picked) engineSelect.value = picked.id;
       await onEngineChange();
     } catch (err) {
       setStatus(`エンジン一覧の取得に失敗: ${err.message}`);
@@ -197,6 +226,8 @@
 
   const onEngineChange = async () => {
     const id = engineSelect.value;
+    savePrefs({ engine: id });
+    prefs.engine = id;
     const e = engines.find((x) => x.id === id);
     voiceRow.hidden = !(e && e.has_voices);
     voiceSelect.innerHTML = "";
@@ -211,9 +242,20 @@
         opt.textContent = v.name;
         voiceSelect.appendChild(opt);
       }
+      const byName = prefs.voiceName
+        ? Array.from(voiceSelect.options).find((o) => o.textContent === prefs.voiceName)
+        : null;
+      if (byName) voiceSelect.value = byName.value;
     } catch (err) {
       setStatus(`話者一覧の取得に失敗: ${err.message}`);
     }
+  };
+
+  const onVoiceChange = () => {
+    const opt = voiceSelect.selectedOptions[0];
+    if (!opt) return;
+    prefs.voiceName = opt.textContent;
+    savePrefs({ voiceName: opt.textContent });
   };
 
   const requestBody = () => {
@@ -508,6 +550,7 @@
   streamBtn.addEventListener("click", startStreaming);
   playBtn.addEventListener("click", togglePlay);
   engineSelect.addEventListener("change", onEngineChange);
+  voiceSelect.addEventListener("change", onVoiceChange);
 
   document.querySelectorAll("[data-skip]").forEach((btn) => {
     btn.addEventListener("click", () => {
