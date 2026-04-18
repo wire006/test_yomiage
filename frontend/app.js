@@ -6,6 +6,7 @@
   const reloadBtn = $("reload-btn");
   const textContent = $("text-content");
   const loadBtn = $("load-btn");
+  const streamBtn = $("stream-btn");
   const audio = $("audio");
   const seek = $("seek");
   const playBtn = $("play-btn");
@@ -22,11 +23,16 @@
   const statusEl = $("status");
 
   let engines = [];
-
   let seeking = false;
   let muted = false;
   let audioCtx = null;
   let gainNode = null;
+
+  // streamState: {
+  //   sessionId, total, durations[], ready[], done, error,
+  //   currentIdx, baseTime, loadingIdx, pollTimer, preloadedIdx
+  // }
+  let streamState = null;
 
   const formatTime = (sec) => {
     if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -68,6 +74,16 @@
     }
   };
 
+  const resumeAudioCtx = async () => {
+    if (audioCtx && audioCtx.state === "suspended") {
+      try {
+        await audioCtx.resume();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   const applyVolume = () => {
     const raw = Number(volumeRange.value);
     const v = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 1;
@@ -85,6 +101,35 @@
   const toggleMute = () => {
     muted = !muted;
     applyVolume();
+  };
+
+  const totalKnownDuration = () => {
+    if (!streamState) return 0;
+    let sum = 0;
+    for (const d of streamState.durations) sum += d || 0;
+    return sum;
+  };
+
+  const globalTime = () => {
+    if (streamState) {
+      return streamState.baseTime + (Number.isFinite(audio.currentTime) ? audio.currentTime : 0);
+    }
+    return Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  };
+
+  const globalDuration = () => {
+    if (streamState) return totalKnownDuration();
+    return Number.isFinite(audio.duration) ? audio.duration : 0;
+  };
+
+  const updateTimeDisplay = () => {
+    if (seeking) return;
+    const cur = globalTime();
+    const dur = globalDuration();
+    seek.max = Math.max(0, dur).toString();
+    seek.value = Math.max(0, Math.min(dur, cur)).toString();
+    currentTimeEl.textContent = formatTime(cur);
+    durationEl.textContent = formatTime(dur);
   };
 
   const fetchTextList = async () => {
@@ -171,21 +216,29 @@
     }
   };
 
-  const synthesizeAndLoad = async () => {
+  const requestBody = () => {
     const text = textContent.value.trim();
-    if (!text) {
+    const engineId = engineSelect.value || "jvs";
+    const speakerVal = voiceSelect.value ? Number(voiceSelect.value) : null;
+    const body = { text, engine: engineId };
+    if (speakerVal !== null && !Number.isNaN(speakerVal)) {
+      body.speaker = speakerVal;
+    }
+    return body;
+  };
+
+  // ===== 一括合成モード =====
+  const synthesizeAndLoad = async () => {
+    stopStreaming();
+    const body = requestBody();
+    if (!body.text) {
       setStatus("テキストが空です");
       return;
     }
-    const engineId = engineSelect.value || "jvs";
-    const speakerVal = voiceSelect.value ? Number(voiceSelect.value) : null;
     loadBtn.disabled = true;
+    streamBtn.disabled = true;
     setStatus("音声を合成中...");
     try {
-      const body = { text, engine: engineId };
-      if (speakerVal !== null && !Number.isNaN(speakerVal)) {
-        body.speaker = speakerVal;
-      }
       const res = await fetch("/api/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -207,22 +260,225 @@
       setStatus(`合成に失敗: ${err.message}`);
     } finally {
       loadBtn.disabled = false;
+      streamBtn.disabled = false;
     }
   };
 
-  const togglePlay = async () => {
-    if (!audio.src) {
-      setStatus("まず「このテキストを読み込む」を押してください");
+  // ===== ストリーミングモード =====
+  const stopStreaming = () => {
+    if (!streamState) return;
+    if (streamState.pollTimer) {
+      clearTimeout(streamState.pollTimer);
+    }
+    streamState = null;
+  };
+
+  const renderStreamProgress = () => {
+    if (!streamState) return;
+    const readyCount = streamState.ready.filter(Boolean).length;
+    const tail = streamState.done
+      ? "合成完了"
+      : streamState.error
+      ? `エラー: ${streamState.error}`
+      : "合成中";
+    setStatus(`${tail} (${readyCount} / ${streamState.total} チャンク)`);
+  };
+
+  const pollStreamStatus = async () => {
+    if (!streamState) return;
+    try {
+      const res = await fetch(`/api/stream/${streamState.sessionId}/status`);
+      if (res.ok) {
+        const data = await res.json();
+        streamState.ready = data.ready;
+        streamState.durations = data.durations;
+        streamState.done = data.done;
+        streamState.error = data.error;
+        renderStreamProgress();
+        updateTimeDisplay();
+        maybePreloadNext();
+      }
+    } catch {
+      // ignore, retry
+    }
+    if (streamState && !streamState.done) {
+      streamState.pollTimer = setTimeout(pollStreamStatus, 1500);
+    }
+  };
+
+  const chunkUrl = (idx, wait) =>
+    `/api/stream/${streamState.sessionId}/chunk/${idx}${wait ? "?wait=true" : ""}`;
+
+  const maybePreloadNext = () => {
+    if (!streamState) return;
+    const nextIdx = streamState.currentIdx + 1;
+    if (nextIdx >= streamState.total) return;
+    if (streamState.preloadedIdx === nextIdx) return;
+    if (!streamState.ready[nextIdx]) return;
+    // ブラウザキャッシュに事前取得
+    fetch(chunkUrl(nextIdx, false)).catch(() => {});
+    streamState.preloadedIdx = nextIdx;
+  };
+
+  const loadChunkIntoAudio = (idx) => {
+    if (!streamState) return Promise.reject(new Error("no stream"));
+    streamState.loadingIdx = idx;
+    return new Promise((resolve, reject) => {
+      const onLoaded = () => {
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.removeEventListener("error", onError);
+        resolve();
+      };
+      const onError = () => {
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.removeEventListener("error", onError);
+        reject(new Error("audio load error"));
+      };
+      audio.addEventListener("loadedmetadata", onLoaded, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+      audio.src = chunkUrl(idx, true);
+      audio.load();
+    });
+  };
+
+  const advanceChunk = async () => {
+    if (!streamState) return;
+    const finishedIdx = streamState.currentIdx;
+    streamState.baseTime += streamState.durations[finishedIdx] || 0;
+    streamState.currentIdx++;
+    if (streamState.currentIdx >= streamState.total) {
+      setStatus("再生完了");
+      playBtn.textContent = "▶";
+      playBtn.classList.remove("playing");
       return;
     }
-    ensureAudioGraph();
-    if (audioCtx && audioCtx.state === "suspended") {
+    try {
+      await loadChunkIntoAudio(streamState.currentIdx);
+      applySpeed();
+      await audio.play();
+      maybePreloadNext();
+    } catch (err) {
+      setStatus(`次チャンク再生失敗: ${err.message}`);
+    }
+  };
+
+  const seekToGlobal = async (targetSec) => {
+    if (!streamState) {
+      if (Number.isFinite(audio.duration)) {
+        audio.currentTime = Math.max(0, Math.min(audio.duration, targetSec));
+      }
+      return;
+    }
+    let remaining = Math.max(0, targetSec);
+    let idx = 0;
+    let base = 0;
+    for (let i = 0; i < streamState.total; i++) {
+      const d = streamState.durations[i];
+      if (d === null || d === undefined) break;
+      if (remaining < d) {
+        idx = i;
+        break;
+      }
+      remaining -= d;
+      base += d;
+      idx = i + 1;
+    }
+    if (idx >= streamState.total) {
+      idx = streamState.total - 1;
+      base = totalKnownDuration() - (streamState.durations[idx] || 0);
+      remaining = streamState.durations[idx] || 0;
+    }
+    if (!streamState.ready[idx]) {
+      setStatus(`チャンク ${idx + 1} を待機中...`);
+    }
+    const wasPlaying = !audio.paused;
+    if (idx !== streamState.currentIdx) {
+      streamState.currentIdx = idx;
+      streamState.baseTime = base;
       try {
-        await audioCtx.resume();
+        await loadChunkIntoAudio(idx);
+      } catch (err) {
+        setStatus(`シーク失敗: ${err.message}`);
+        return;
+      }
+    }
+    const cap = Number.isFinite(audio.duration) ? audio.duration : remaining;
+    audio.currentTime = Math.max(0, Math.min(cap, remaining));
+    if (wasPlaying) {
+      try {
+        await audio.play();
       } catch {
         // ignore
       }
     }
+    maybePreloadNext();
+  };
+
+  const startStreaming = async () => {
+    const body = requestBody();
+    if (!body.text) {
+      setStatus("テキストが空です");
+      return;
+    }
+    stopStreaming();
+    ensureAudioGraph();
+    await resumeAudioCtx();
+    applyVolume();
+
+    loadBtn.disabled = true;
+    streamBtn.disabled = true;
+    setStatus("ストリーミング開始中...");
+
+    try {
+      const res = await fetch("/api/stream/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`HTTP ${res.status}: ${msg}`);
+      }
+      const data = await res.json();
+      streamState = {
+        sessionId: data.session_id,
+        total: data.total,
+        ready: data.ready || [],
+        durations: data.durations || [],
+        done: !!data.done,
+        error: data.error || null,
+        currentIdx: 0,
+        baseTime: 0,
+        loadingIdx: -1,
+        preloadedIdx: -1,
+      };
+      renderStreamProgress();
+      await loadChunkIntoAudio(0);
+      applySpeed();
+      try {
+        await audio.play();
+      } catch (err) {
+        setStatus(`再生開始に失敗: ${err.message}`);
+      }
+      maybePreloadNext();
+      pollStreamStatus();
+    } catch (err) {
+      setStatus(`ストリーミング失敗: ${err.message}`);
+      stopStreaming();
+    } finally {
+      loadBtn.disabled = false;
+      streamBtn.disabled = false;
+    }
+  };
+
+  // ===== 共通再生コントロール =====
+  const togglePlay = async () => {
+    if (!audio.src) {
+      setStatus("まず「このテキストを読み込む」または「ストリーミング再生」を押してください");
+      return;
+    }
+    ensureAudioGraph();
+    await resumeAudioCtx();
     applyVolume();
     if (audio.paused) {
       try {
@@ -236,17 +492,20 @@
   };
 
   const skipBy = (seconds) => {
+    if (streamState) {
+      seekToGlobal(globalTime() + seconds);
+      return;
+    }
     if (!Number.isFinite(audio.duration)) return;
-    const next = Math.min(
-      audio.duration,
-      Math.max(0, audio.currentTime + seconds),
-    );
+    const next = Math.min(audio.duration, Math.max(0, audio.currentTime + seconds));
     audio.currentTime = next;
   };
 
+  // ===== イベント =====
   select.addEventListener("change", loadSelectedText);
   reloadBtn.addEventListener("click", fetchTextList);
   loadBtn.addEventListener("click", synthesizeAndLoad);
+  streamBtn.addEventListener("click", startStreaming);
   playBtn.addEventListener("click", togglePlay);
   engineSelect.addEventListener("change", onEngineChange);
 
@@ -267,15 +526,11 @@
   muteBtn.addEventListener("click", toggleMute);
 
   audio.addEventListener("loadedmetadata", () => {
-    seek.max = audio.duration.toString();
-    durationEl.textContent = formatTime(audio.duration);
     applySpeed();
+    updateTimeDisplay();
   });
-  audio.addEventListener("timeupdate", () => {
-    if (seeking) return;
-    seek.value = audio.currentTime.toString();
-    currentTimeEl.textContent = formatTime(audio.currentTime);
-  });
+  audio.addEventListener("timeupdate", updateTimeDisplay);
+  audio.addEventListener("durationchange", updateTimeDisplay);
   audio.addEventListener("play", () => {
     playBtn.textContent = "❚❚";
     playBtn.classList.add("playing");
@@ -286,6 +541,10 @@
     playBtn.classList.remove("playing");
   });
   audio.addEventListener("ended", () => {
+    if (streamState) {
+      advanceChunk();
+      return;
+    }
     playBtn.textContent = "▶";
     playBtn.classList.remove("playing");
   });
@@ -298,13 +557,13 @@
     seeking = true;
   };
   const commitSeek = () => {
-    if (!Number.isFinite(audio.duration)) {
+    if (globalDuration() <= 0) {
       seeking = false;
       return;
     }
-    audio.currentTime = Number(seek.value);
-    currentTimeEl.textContent = formatTime(audio.currentTime);
+    const target = Number(seek.value);
     seeking = false;
+    seekToGlobal(target);
   };
   seek.addEventListener("pointerdown", beginSeek);
   seek.addEventListener("pointerup", commitSeek);

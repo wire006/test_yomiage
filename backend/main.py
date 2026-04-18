@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from tts_engine import get_engine as get_jvs_engine
 from voicevox_engine import VOICEVOX_URL, get_engine as get_voicevox_engine
+import stream
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 TEXTS_DIR = BASE_DIR / "texts"
@@ -131,6 +132,57 @@ def synthesize(req: SynthesizeRequest) -> Response:
 
     cache_path.write_bytes(wav_bytes)
     return Response(content=wav_bytes, media_type="audio/wav")
+
+
+@app.post("/api/stream/start")
+def stream_start(req: SynthesizeRequest) -> dict:
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty text")
+    try:
+        session = stream.create_or_get(text, req.engine or "jvs", req.speaker)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "session_id": session.id,
+        "total": session.total,
+        "chunks": session.chunks,
+        "ready": list(session.ready),
+        "durations": list(session.durations),
+        "done": session.done,
+        "error": session.error,
+    }
+
+
+@app.get("/api/stream/{sid}/status")
+def stream_status(sid: str) -> dict:
+    session = stream.get(sid)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {
+        "session_id": session.id,
+        "total": session.total,
+        "ready": list(session.ready),
+        "durations": list(session.durations),
+        "done": session.done,
+        "error": session.error,
+    }
+
+
+@app.get("/api/stream/{sid}/chunk/{idx}")
+def stream_chunk(sid: str, idx: int, wait: bool = False) -> Response:
+    session = stream.get(sid)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if idx < 0 or idx >= session.total:
+        raise HTTPException(status_code=400, detail="chunk index out of range")
+    if wait and not session.ready[idx]:
+        session.wait_for(idx, timeout=180.0)
+    if session.error and not session.ready[idx]:
+        raise HTTPException(status_code=500, detail=session.error)
+    if not session.ready[idx]:
+        raise HTTPException(status_code=425, detail="chunk not ready")
+    return FileResponse(session.chunk_path(idx), media_type="audio/wav")
 
 
 if FRONTEND_DIR.exists():
