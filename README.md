@@ -1,29 +1,30 @@
-# JVS 読み上げ (test_yomiage)
+# 読み上げアプリ (test_yomiage)
 
 iPhone (Safari) からの使用を想定した、テキストファイル読み上げアプリです。
-音声は [JVS (Japanese Versatile Speech) corpus](https://sites.google.com/site/shinnosuketakamichi/research-topics/jvs_corpus)
-で学習された [ESPnet-TTS](https://github.com/espnet/espnet) の事前学習済み多話者
-日本語 VITS モデルを用いて合成します (例: `kan-bayashi/jvs_jvs010_vits_prosody`)。
+音声合成には [VOICEVOX](https://voicevox.hiroshiba.jp/) を使用します。
 
 ## 機能
 
-- 保存されているテキストファイル (`texts/*.txt`) を一覧から選んで読み上げ
+- サーバ上のテキスト (`texts/*.txt`) または端末のファイルを選んで読み上げ
+- VOICEVOX 話者から自由に選択 (初期値: 冥鳴ひまり / ノーマル)
 - 読み上げ速度 0.5x〜2.0x を 0.1x 刻みで可変
-- シークバーで再生位置を自由に選択
-- 10秒 / 60秒 の巻き戻し・早送りボタン
-- iPhone で指でタップしやすい大きなボタン、セーフエリア対応、ダークテーマ
+- シークバー、10秒 / 60秒 の巻き戻し・早送り
+- ストリーミング再生 (最初のチャンクが出来次第再生開始、裏で残りを合成)
+- 端末内で音量調整 (Web Audio Gain)
+- エンジン/話者の選択を localStorage に保存
+- Cloudflare Tunnel で外出先からもアクセス可
 
 ## 構成
 
 ```
-backend/     FastAPI + ESPnet-TTS サーバー
-frontend/    iPhone Safari 向け Web UI (HTML / CSS / JS)
+backend/     FastAPI サーバ (VOICEVOX を HTTP 経由で呼ぶ)
+frontend/    iPhone Safari 向け Web UI
 texts/       読み上げ対象のテキスト (.txt) を置くディレクトリ
 ```
 
 ## セットアップ
 
-Python 3.10+ 推奨 (ESPnet の要件)。
+Python 3.10+。
 
 ```bash
 cd backend
@@ -33,136 +34,141 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-初回起動時に JVS 学習済みモデルが自動ダウンロードされます
-(`.cache/espnet/` にキャッシュ)。回線状況によっては数百 MB 程度かかります。
+## VOICEVOX Engine の起動
 
-別のモデルを使いたい場合は環境変数で切り替えられます。
+Docker 推奨。GPU 版がある場合は `--gpus all` を付けると高速になります。
 
 ```bash
-export JVS_MODEL_TAG="kan-bayashi/jvs_jvs010_vits_prosody"
+# GPU 版 (NVIDIA + nvidia-container-toolkit が必要)
+docker run -d --rm --gpus all -p '0.0.0.0:50021:50021' \
+  --name voicevox voicevox/voicevox_engine:nvidia-ubuntu22.04-latest
+
+# CPU 版 (GPU が無い場合)
+docker run -d --rm -p '0.0.0.0:50021:50021' \
+  --name voicevox voicevox/voicevox_engine:cpu-latest
+
+# 起動確認
+curl http://127.0.0.1:50021/version
 ```
 
-## 起動
+別ホストで起動している場合は環境変数で指定します。
+
+```bash
+VOICEVOX_URL=http://192.168.1.50:50021 uvicorn main:app ...
+```
+
+## アプリの起動
 
 ```bash
 cd backend
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-iPhone から同一 LAN のサーバーにアクセスします。
-
-```
-http://<PC の IP>:8000/
-```
-
-Safari で開き、「ホーム画面に追加」すると PWA 風に使えます。
+同一 LAN の iPhone から `http://<PC の IP>:8000/` にアクセス。
+Safari で「ホーム画面に追加」すると PWA 風に使えます。
 
 ## 使い方
 
-1. 読み上げたいテキストを `texts/sample.txt` のように `.txt` で配置
-2. アプリで一覧から選択 → 必要に応じて編集
-3. 「このテキストを読み込む」で音声を合成 (サーバー側でキャッシュ)
-4. ▶ で再生。速度スライダー、シークバー、±10秒 / ±60秒 ボタンで操作
+1. 読み上げたいテキストを `texts/*.txt` に置くか、「端末から選ぶ」で iPhone 内のファイルを読む
+2. 話者を選ぶ (初回は VOICEVOX / 冥鳴ひまり / ノーマル)
+3. 「このテキストを読み込む」で一括合成、または「ストリーミング再生」で即再生
+4. シークバーや ±10 / ±60 秒ボタンで操作
 
 ## API
 
-| Method | Path                   | 説明                               |
-| ------ | ---------------------- | ---------------------------------- |
-| GET    | `/api/texts`           | `texts/` の `.txt` 一覧            |
-| GET    | `/api/texts/{name}`    | テキスト本文の取得                 |
-| POST   | `/api/synthesize`      | `{ "text": "..." }` から WAV を返す |
+| Method | Path                               | 説明                                  |
+| ------ | ---------------------------------- | ------------------------------------- |
+| GET    | `/api/texts`                       | `texts/` の `.txt` 一覧               |
+| GET    | `/api/texts/{name}`                | テキスト本文                          |
+| GET    | `/api/engines`                     | 利用可能なエンジン (VOICEVOX のみ)    |
+| GET    | `/api/engines/voicevox/voices`     | VOICEVOX の話者一覧                   |
+| POST   | `/api/synthesize`                  | 一括合成 WAV                          |
+| POST   | `/api/stream/start`                | ストリーミングセッション開始          |
+| GET    | `/api/stream/{sid}/status`         | 進捗ポーリング                        |
+| GET    | `/api/stream/{sid}/chunk/{idx}`    | 合成済みチャンク WAV                  |
 
-## 高速化オプション
+## 外出先からのアクセス (Cloudflare Tunnel)
 
-長文読み上げ時の待ち時間を減らすための設定。
+自宅ルータの設定やグローバル IP 無しで、インターネット経由の iPhone から
+アプリに到達できます。試用目的なら無料でドメイン登録も不要です。
 
-### 1. GPU を使う (NVIDIA CUDA)
-
-NVIDIA GPU があれば JVS の合成が 5〜20 倍速くなります。WSL2 でも
-Windows 側に最新の NVIDIA ドライバが入っていれば CUDA が使えます。
-
-**Windows 側:**
-
-1. [NVIDIA 公式](https://www.nvidia.com/Download/index.aspx) から最新
-   Game Ready / Studio ドライバをインストール (WSL 対応は 470 以降)
-2. PowerShell で `nvidia-smi` が動くか確認
-
-**WSL 側 (Ubuntu):**
+### 1. cloudflared のインストール (WSL2 / Ubuntu)
 
 ```bash
-nvidia-smi   # Windows と同じ情報が見えれば OK
-# venv 内で
-python -c "import torch; print(torch.cuda.is_available())"
+curl -L --output cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+cloudflared --version
 ```
 
-`True` が返れば自動で GPU が使われます。明示したい場合:
+### 2a. クイック起動 (使い捨て URL)
+
+Cloudflare アカウント不要、起動のたびに URL が変わります。試用向け。
 
 ```bash
-JVS_DEVICE=cuda uvicorn main:app --host 0.0.0.0 --port 8000
-# 強制 CPU
-JVS_DEVICE=cpu uvicorn main:app --host 0.0.0.0 --port 8000
+# 先に uvicorn を起動しておく (別ターミナル)
+uvicorn main:app --host 127.0.0.1 --port 8000 --forwarded-allow-ips='*' --proxy-headers
+
+# 別ターミナルでトンネルを張る
+cloudflared tunnel --url http://127.0.0.1:8000
 ```
 
-`/api/engines` の `device` フィールドで現在のデバイスが確認できます。
-UI のエンジン名にも `[cuda]` / `[cpu]` と表示されます。
+ログに出る `https://xxxxx-xxxxx.trycloudflare.com` を iPhone で開く。
 
-### 2. VITS の monotonic_align を Cython でビルド
+### 2b. 固定 URL (Cloudflare アカウント + 自分のドメイン)
 
-起動時ログの警告
-
-```
-Cython version is not available. Fallback to 'EXPERIMETAL' numba version.
-```
-
-を解消すると合成が 1〜2 割速くなります。
+外から毎回同じ URL を使いたい場合。
 
 ```bash
-cd ~/test_yomiage/backend
-source .venv/bin/activate
-cd .venv/lib/python3.11/site-packages/espnet2/gan_tts/vits/monotonic_align
-python setup.py build_ext --inplace
+# 1. ブラウザでログイン
+cloudflared tunnel login
+
+# 2. トンネル作成 (一度だけ)
+cloudflared tunnel create yomiage
+
+# 3. ~/.cloudflared/config.yml を作成
+cat > ~/.cloudflared/config.yml <<'EOF'
+tunnel: yomiage
+credentials-file: /home/<USER>/.cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: yomiage.example.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+EOF
+
+# 4. DNS を Cloudflare に登録
+cloudflared tunnel route dns yomiage yomiage.example.com
+
+# 5. 起動
+cloudflared tunnel run yomiage
 ```
 
-完了後に uvicorn を再起動すれば警告が消えます。
+iPhone から `https://yomiage.example.com/` で到達。
 
-### 3. VOICEVOX を併用 (軽量・高速)
+### 3. アクセス制限 (推奨)
 
-[VOICEVOX](https://voicevox.hiroshiba.jp/) は CPU でもリアルタイム以上で
-動く日本語 TTS です。UI の「エンジン」プルダウンで切り替えられます。
-JVS モデルは使わないので話者は VOICEVOX のものになります。
+公開 URL に誰でも到達できる状態なので、Cloudflare Zero Trust の
+Access Application で自分の Google / メールアドレスだけ通す設定を
+被せるのが安全です (無料プランで可)。
 
-**Docker で起動 (推奨)**
+### 4. uvicorn 側のヒント
+
+プロキシ越しだと `X-Forwarded-*` ヘッダが入ります。正しい URL / IP を
+ログに残したい場合は起動オプションで以下を付けます。
 
 ```bash
-# CPU 版
-docker run -d --rm -p '127.0.0.1:50021:50021' \
-  --name voicevox voicevox/voicevox_engine:cpu-latest
-# GPU 版 (NVIDIA)
-docker run -d --rm --gpus all -p '127.0.0.1:50021:50021' \
-  --name voicevox voicevox/voicevox_engine:nvidia-latest
+uvicorn main:app --host 127.0.0.1 --port 8000 \
+  --proxy-headers --forwarded-allow-ips='*'
 ```
 
-**起動後の確認**
-
-```bash
-curl http://127.0.0.1:50021/version
-```
-
-アプリを再読み込みするとエンジン選択に「VOICEVOX」が追加されます。
-話者プルダウンで好きなキャラクター/スタイルを選んで合成できます。
-
-**環境変数**
-
-```bash
-# 別ホストで起動している場合
-VOICEVOX_URL=http://192.168.1.50:50021 uvicorn main:app ...
-```
+`--host 127.0.0.1` にすると LAN には公開されず、Cloudflare Tunnel 経由
+だけで届くようになります (外部公開を Cloudflare Access 限定にしたい場合
+に便利)。
 
 ## 注意
 
-- JVS コーパスおよびそれを用いた学習済みモデルは、各配布元のライセンス
-  (研究目的など) に従って利用してください。商用利用や再配布の可否は各自で
-  ご確認ください。
 - VOICEVOX の音声を公開・商用利用する場合は各キャラクターの利用規約に
   従ってください ([公式](https://voicevox.hiroshiba.jp/term/))。
-- 合成には GPU があると高速ですが、CPU でも動作します (初回は遅め)。
+- Cloudflare Tunnel の trycloudflare.com は URL が毎回変わり、帯域制限や
+  将来の仕様変更があります。恒常的に使うならアカウント + DNS 登録を推奨。

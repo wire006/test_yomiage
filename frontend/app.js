@@ -280,9 +280,8 @@
 
   const requestBody = () => {
     const text = textContent.value.trim();
-    const engineId = engineSelect.value || "jvs";
     const speakerVal = voiceSelect.value ? Number(voiceSelect.value) : null;
-    const body = { text, engine: engineId };
+    const body = { text, engine: "voicevox" };
     if (speakerVal !== null && !Number.isNaN(speakerVal)) {
       body.speaker = speakerVal;
     }

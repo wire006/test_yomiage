@@ -1,10 +1,13 @@
-"""iPhone 向けテキスト読み上げアプリのバックエンド。
+"""iPhone 向けテキスト読み上げアプリのバックエンド (VOICEVOX 専用)。
 
 - GET  /api/texts                      保存されているテキストファイル一覧
 - GET  /api/texts/{name}               テキスト内容の取得
-- GET  /api/engines                    利用可能な TTS エンジン一覧
+- GET  /api/engines                    利用可能な TTS エンジン一覧 (VOICEVOX のみ)
 - GET  /api/engines/voicevox/voices    VOICEVOX の話者一覧
 - POST /api/synthesize                 テキストから合成音声 (WAV) を返す
+- POST /api/stream/start               ストリーミング合成セッションの開始
+- GET  /api/stream/{sid}/status        セッションの進捗
+- GET  /api/stream/{sid}/chunk/{idx}   チャンク WAV の取得
 - 静的ファイル (/)                     frontend ディレクトリを配信
 """
 
@@ -20,7 +23,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from tts_engine import get_engine as get_jvs_engine
 from voicevox_engine import VOICEVOX_URL, get_engine as get_voicevox_engine
 import stream
 
@@ -33,7 +35,7 @@ TEXTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _SAFE_NAME = re.compile(r"^[\w\-. ]+\.txt$")
 
-app = FastAPI(title="JVS Yomiage")
+app = FastAPI(title="Yomiage (VOICEVOX)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +47,7 @@ app.add_middleware(
 
 class SynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=50000)
-    engine: str = "jvs"
+    engine: str = "voicevox"
     speaker: int | None = None
 
 
@@ -67,17 +69,9 @@ def read_text(name: str) -> dict:
 
 @app.get("/api/engines")
 def list_engines() -> dict:
-    jvs = get_jvs_engine()
     vv = get_voicevox_engine()
     return {
         "engines": [
-            {
-                "id": "jvs",
-                "name": "JVS (ESPnet VITS)",
-                "available": True,
-                "device": jvs.device,
-                "has_voices": False,
-            },
             {
                 "id": "voicevox",
                 "name": "VOICEVOX",
@@ -109,22 +103,16 @@ def synthesize(req: SynthesizeRequest) -> Response:
     if not text:
         raise HTTPException(status_code=400, detail="empty text")
 
-    engine = (req.engine or "jvs").lower()
     speaker = req.speaker
 
-    key_src = f"{engine}|{speaker}|{text}".encode("utf-8")
+    key_src = f"voicevox|{speaker}|{text}".encode("utf-8")
     key = hashlib.sha256(key_src).hexdigest()
     cache_path = AUDIO_CACHE_DIR / f"{key}.wav"
     if cache_path.exists():
         return FileResponse(cache_path, media_type="audio/wav")
 
     try:
-        if engine == "voicevox":
-            wav_bytes = get_voicevox_engine().synthesize(text, speaker or 1)
-        elif engine == "jvs":
-            wav_bytes = get_jvs_engine().synthesize(text)
-        else:
-            raise HTTPException(status_code=400, detail=f"unknown engine: {engine}")
+        wav_bytes = get_voicevox_engine().synthesize(text, speaker or 1)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -140,7 +128,7 @@ def stream_start(req: SynthesizeRequest) -> dict:
     if not text:
         raise HTTPException(status_code=400, detail="empty text")
     try:
-        session = stream.create_or_get(text, req.engine or "jvs", req.speaker)
+        session = stream.create_or_get(text, req.speaker)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

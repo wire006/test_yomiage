@@ -1,12 +1,12 @@
-"""ストリーミング合成のセッション管理。
+"""ストリーミング合成のセッション管理 (VOICEVOX 専用)。
 
 クライアントは /api/stream/start でセッションを開始し、裏で 1 チャンクずつ
 合成が進む。/api/stream/{sid}/chunk/{idx} で各 WAV を取得する (まだ合成が
 済んでいない場合は wait=true で完了を待てる)。/api/stream/{sid}/status で
 進捗をポーリングする。
 
-セッションは (text, engine, speaker) のハッシュで決まるので、同じ入力を
-再投入してもキャッシュが効く。
+セッションは (text, speaker) のハッシュで決まるので、同じ入力を再投入
+してもキャッシュが効く。
 """
 
 from __future__ import annotations
@@ -24,14 +24,12 @@ from text_utils import split_into_chunks
 _STREAM_DIR = Path(".cache/stream")
 _STREAM_DIR.mkdir(parents=True, exist_ok=True)
 
-_MAX_CHARS_JVS = 60
-_MAX_CHARS_VOICEVOX = 120
+_MAX_CHARS = 120
 
 
 @dataclass
 class StreamSession:
     id: str
-    engine: str
     speaker: int | None
     chunks: list[str]
     dir: Path
@@ -48,7 +46,6 @@ class StreamSession:
             self.ready = [False] * n
         if not self.durations:
             self.durations = [None] * n
-        # 既にディスクに残っているチャンクを ready に反映
         for i in range(n):
             path = self.dir / f"{i:05d}.wav"
             if path.exists():
@@ -75,13 +72,9 @@ class StreamSession:
         self._thread.start()
 
     def _synth_chunk(self, text: str) -> bytes:
-        if self.engine == "voicevox":
-            from voicevox_engine import get_engine
+        from voicevox_engine import get_engine
 
-            return get_engine().synthesize(text, self.speaker or 1)
-        from tts_engine import get_engine
-
-        return get_engine().synthesize(text)
+        return get_engine().synthesize(text, self.speaker or 1)
 
     def _run(self) -> None:
         try:
@@ -122,16 +115,11 @@ _sessions: dict[str, StreamSession] = {}
 _registry_lock = threading.Lock()
 
 
-def _chunk_size_for(engine: str) -> int:
-    return _MAX_CHARS_VOICEVOX if engine == "voicevox" else _MAX_CHARS_JVS
-
-
-def create_or_get(text: str, engine: str, speaker: int | None) -> StreamSession:
+def create_or_get(text: str, speaker: int | None) -> StreamSession:
     text = text.strip()
     if not text:
         raise ValueError("empty text")
-    engine = (engine or "jvs").lower()
-    key_src = f"{engine}|{speaker}|{text}".encode("utf-8")
+    key_src = f"voicevox|{speaker}|{text}".encode("utf-8")
     sid = hashlib.sha256(key_src).hexdigest()[:24]
 
     with _registry_lock:
@@ -140,12 +128,11 @@ def create_or_get(text: str, engine: str, speaker: int | None) -> StreamSession:
             existing.start()
             return existing
 
-        chunks = split_into_chunks(text, _chunk_size_for(engine)) or [text]
+        chunks = split_into_chunks(text, _MAX_CHARS) or [text]
         sdir = _STREAM_DIR / sid
         sdir.mkdir(parents=True, exist_ok=True)
         session = StreamSession(
             id=sid,
-            engine=engine,
             speaker=speaker,
             chunks=chunks,
             dir=sdir,
