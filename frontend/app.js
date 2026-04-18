@@ -4,6 +4,8 @@
   const $ = (id) => document.getElementById(id);
   const select = $("text-select");
   const reloadBtn = $("reload-btn");
+  const localFileBtn = $("local-file-btn");
+  const localFileInput = $("local-file-input");
   const textContent = $("text-content");
   const loadBtn = $("load-btn");
   const streamBtn = $("stream-btn");
@@ -562,8 +564,28 @@
   };
 
   // ===== イベント =====
+  const readLocalFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      textContent.value = typeof reader.result === "string" ? reader.result : "";
+      setStatus(`${file.name} を読み込みました (端末)`);
+      select.value = "";
+    };
+    reader.onerror = () => {
+      setStatus(`ファイル読み込み失敗: ${reader.error?.message || "unknown"}`);
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
   select.addEventListener("change", loadSelectedText);
   reloadBtn.addEventListener("click", fetchTextList);
+  localFileBtn.addEventListener("click", () => localFileInput.click());
+  localFileInput.addEventListener("change", () => {
+    const file = localFileInput.files && localFileInput.files[0];
+    readLocalFile(file);
+    localFileInput.value = "";
+  });
   loadBtn.addEventListener("click", synthesizeAndLoad);
   streamBtn.addEventListener("click", startStreaming);
   playBtn.addEventListener("click", togglePlay);

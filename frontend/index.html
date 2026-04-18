@@ -21,6 +21,8 @@
         <label for="text-select">テキストファイル</label>
         <select id="text-select" aria-label="読み上げるテキストを選択"></select>
         <button id="reload-btn" type="button" aria-label="一覧を更新">↻</button>
+        <button id="local-file-btn" type="button" class="local-file" aria-label="端末のテキストを選択">端末から選ぶ</button>
+        <input id="local-file-input" type="file" accept=".txt,text/plain" hidden />
       </section>
 
       <section class="voice-picker">
