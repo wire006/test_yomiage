@@ -1,0 +1,252 @@
+:root {
+  color-scheme: dark light;
+  --bg: #111418;
+  --surface: #1b1f26;
+  --surface-2: #262c36;
+  --text: #f2f4f8;
+  --muted: #9aa4b2;
+  --accent: #4f9cf9;
+  --accent-strong: #2f7be0;
+  --danger: #ff6b6b;
+  --radius: 14px;
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP",
+    "Yu Gothic UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 16px;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.file-picker {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.file-picker label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.file-picker select {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.file-picker button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+}
+
+.text-preview {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.text-preview textarea {
+  width: 100%;
+  min-height: 140px;
+  max-height: 40vh;
+  resize: vertical;
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  font-family: inherit;
+}
+
+.text-preview button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.text-preview button:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.player {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.status {
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 1em;
+}
+
+.seek {
+  width: 100%;
+}
+
+.time {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.skip-buttons {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.skip-buttons button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  padding: 14px 0;
+  font-size: 15px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.skip-buttons .play {
+  background: var(--accent);
+  color: #fff;
+  font-size: 22px;
+  padding: 18px 0;
+}
+
+.skip-buttons .play.playing {
+  background: var(--accent-strong);
+}
+
+.speed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.speed label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.speed-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+#speed-label {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 3.2em;
+  text-align: right;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 32px;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: -8px;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #fff;
+}
+
+button {
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+button:active {
+  transform: scale(0.97);
+}

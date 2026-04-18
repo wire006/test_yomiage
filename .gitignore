@@ -1,0 +1,9 @@
+.cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+node_modules/
+*.wav
+!texts/*.wav
