@@ -16,7 +16,12 @@
   const volumeRange = $("volume-range");
   const volumeLabel = $("volume-label");
   const muteBtn = $("mute-btn");
+  const engineSelect = $("engine-select");
+  const voiceRow = $("voice-row");
+  const voiceSelect = $("voice-select");
   const statusEl = $("status");
+
+  let engines = [];
 
   let seeking = false;
   let muted = false;
@@ -121,19 +126,70 @@
     }
   };
 
+  const fetchEngines = async () => {
+    try {
+      const res = await fetch("/api/engines");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      engines = data.engines || [];
+      engineSelect.innerHTML = "";
+      for (const e of engines) {
+        const opt = document.createElement("option");
+        opt.value = e.id;
+        opt.textContent = e.available
+          ? `${e.name}${e.device ? ` [${e.device}]` : ""}`
+          : `${e.name} (未起動)`;
+        opt.disabled = !e.available;
+        engineSelect.appendChild(opt);
+      }
+      const firstAvailable = engines.find((e) => e.available);
+      if (firstAvailable) engineSelect.value = firstAvailable.id;
+      await onEngineChange();
+    } catch (err) {
+      setStatus(`エンジン一覧の取得に失敗: ${err.message}`);
+    }
+  };
+
+  const onEngineChange = async () => {
+    const id = engineSelect.value;
+    const e = engines.find((x) => x.id === id);
+    voiceRow.hidden = !(e && e.has_voices);
+    voiceSelect.innerHTML = "";
+    if (!e || !e.has_voices) return;
+    try {
+      const res = await fetch(`/api/engines/${id}/voices`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      for (const v of data.voices) {
+        const opt = document.createElement("option");
+        opt.value = String(v.id);
+        opt.textContent = v.name;
+        voiceSelect.appendChild(opt);
+      }
+    } catch (err) {
+      setStatus(`話者一覧の取得に失敗: ${err.message}`);
+    }
+  };
+
   const synthesizeAndLoad = async () => {
     const text = textContent.value.trim();
     if (!text) {
       setStatus("テキストが空です");
       return;
     }
+    const engineId = engineSelect.value || "jvs";
+    const speakerVal = voiceSelect.value ? Number(voiceSelect.value) : null;
     loadBtn.disabled = true;
     setStatus("音声を合成中...");
     try {
+      const body = { text, engine: engineId };
+      if (speakerVal !== null && !Number.isNaN(speakerVal)) {
+        body.speaker = speakerVal;
+      }
       const res = await fetch("/api/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const msg = await res.text();
@@ -192,6 +248,7 @@
   reloadBtn.addEventListener("click", fetchTextList);
   loadBtn.addEventListener("click", synthesizeAndLoad);
   playBtn.addEventListener("click", togglePlay);
+  engineSelect.addEventListener("change", onEngineChange);
 
   document.querySelectorAll("[data-skip]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -260,5 +317,6 @@
 
   applySpeed();
   applyVolume();
+  fetchEngines();
   fetchTextList();
 })();

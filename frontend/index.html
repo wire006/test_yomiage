@@ -23,6 +23,17 @@
         <button id="reload-btn" type="button" aria-label="一覧を更新">↻</button>
       </section>
 
+      <section class="voice-picker">
+        <div class="picker-row">
+          <label for="engine-select">エンジン</label>
+          <select id="engine-select" aria-label="TTS エンジン"></select>
+        </div>
+        <div class="picker-row" id="voice-row" hidden>
+          <label for="voice-select">話者</label>
+          <select id="voice-select" aria-label="話者"></select>
+        </div>
+      </section>
+
       <section class="text-preview" aria-live="polite">
         <textarea
           id="text-content"

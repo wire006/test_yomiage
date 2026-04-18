@@ -83,6 +83,40 @@ body {
   font-size: 18px;
 }
 
+.voice-picker {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picker-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.picker-row label {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 5em;
+}
+
+.picker-row select {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .text-preview {
   background: var(--surface);
   border-radius: var(--radius);

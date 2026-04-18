@@ -72,9 +72,97 @@ Safari で開き、「ホーム画面に追加」すると PWA 風に使えま�
 | GET    | `/api/texts/{name}`    | テキスト本文の取得                 |
 | POST   | `/api/synthesize`      | `{ "text": "..." }` から WAV を返す |
 
+## 高速化オプション
+
+長文読み上げ時の待ち時間を減らすための設定。
+
+### 1. GPU を使う (NVIDIA CUDA)
+
+NVIDIA GPU があれば JVS の合成が 5〜20 倍速くなります。WSL2 でも
+Windows 側に最新の NVIDIA ドライバが入っていれば CUDA が使えます。
+
+**Windows 側:**
+
+1. [NVIDIA 公式](https://www.nvidia.com/Download/index.aspx) から最新
+   Game Ready / Studio ドライバをインストール (WSL 対応は 470 以降)
+2. PowerShell で `nvidia-smi` が動くか確認
+
+**WSL 側 (Ubuntu):**
+
+```bash
+nvidia-smi   # Windows と同じ情報が見えれば OK
+# venv 内で
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+`True` が返れば自動で GPU が使われます。明示したい場合:
+
+```bash
+JVS_DEVICE=cuda uvicorn main:app --host 0.0.0.0 --port 8000
+# 強制 CPU
+JVS_DEVICE=cpu uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+`/api/engines` の `device` フィールドで現在のデバイスが確認できます。
+UI のエンジン名にも `[cuda]` / `[cpu]` と表示されます。
+
+### 2. VITS の monotonic_align を Cython でビルド
+
+起動時ログの警告
+
+```
+Cython version is not available. Fallback to 'EXPERIMETAL' numba version.
+```
+
+を解消すると合成が 1〜2 割速くなります。
+
+```bash
+cd ~/test_yomiage/backend
+source .venv/bin/activate
+cd .venv/lib/python3.11/site-packages/espnet2/gan_tts/vits/monotonic_align
+python setup.py build_ext --inplace
+```
+
+完了後に uvicorn を再起動すれば警告が消えます。
+
+### 3. VOICEVOX を併用 (軽量・高速)
+
+[VOICEVOX](https://voicevox.hiroshiba.jp/) は CPU でもリアルタイム以上で
+動く日本語 TTS です。UI の「エンジン」プルダウンで切り替えられます。
+JVS モデルは使わないので話者は VOICEVOX のものになります。
+
+**Docker で起動 (推奨)**
+
+```bash
+# CPU 版
+docker run -d --rm -p '127.0.0.1:50021:50021' \
+  --name voicevox voicevox/voicevox_engine:cpu-latest
+# GPU 版 (NVIDIA)
+docker run -d --rm --gpus all -p '127.0.0.1:50021:50021' \
+  --name voicevox voicevox/voicevox_engine:nvidia-latest
+```
+
+**起動後の確認**
+
+```bash
+curl http://127.0.0.1:50021/version
+```
+
+アプリを再読み込みするとエンジン選択に「VOICEVOX」が追加されます。
+話者プルダウンで好きなキャラクター/スタイルを選んで合成できます。
+
+**環境変数**
+
+```bash
+# 別ホストで起動している場合
+VOICEVOX_URL=http://192.168.1.50:50021 uvicorn main:app ...
+```
+
 ## 注意
 
 - JVS コーパスおよびそれを用いた学習済みモデルは、各配布元のライセンス
   (研究目的など) に従って利用してください。商用利用や再配布の可否は各自で
   ご確認ください。
+- VOICEVOX の音声を公開・商用利用する場合は各キャラクターの利用規約に
+  従ってください ([公式](https://voicevox.hiroshiba.jp/term/))。
 - 合成には GPU があると高速ですが、CPU でも動作します (初回は遅め)。

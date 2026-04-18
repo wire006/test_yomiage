@@ -4,20 +4,21 @@ ESPnet モデルズーには JVS コーパスで学習された日本語多話�
 (kan-bayashi/jvs_jvs010_vits_prosody など) が公開されているため、
 それを利用する。初回呼び出し時にモデルをダウンロード・キャッシュする。
 
-長文は文単位で分割して合成し、結果を連結する。VITS は短文向けの学習で
-長文を一度に渡すと C 拡張 (pyopenjtalk 等) でクラッシュすることがある。
+GPU が利用可能 (CUDA) なら自動で cuda を使う。環境変数 JVS_DEVICE=cpu
+で強制的に CPU にできる。
 """
 
 from __future__ import annotations
 
 import io
 import os
-import re
 import threading
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+
+from text_utils import split_into_chunks
 
 _DEFAULT_MODEL_TAG = os.environ.get(
     "JVS_MODEL_TAG", "kan-bayashi/jvs_jvs010_vits_prosody"
@@ -26,40 +27,33 @@ _CACHE_DIR = Path(os.environ.get("JVS_CACHE_DIR", "./.cache/espnet"))
 _MAX_CHUNK_CHARS = int(os.environ.get("JVS_MAX_CHUNK_CHARS", "60"))
 _CHUNK_SILENCE_SEC = float(os.environ.get("JVS_CHUNK_SILENCE_SEC", "0.25"))
 
-_SENT_BOUNDARY = re.compile(r"(?<=[。！？!?\n])")
-_SUB_BOUNDARY = re.compile(r"(?<=[、,])")
 
+def _resolve_device() -> str:
+    forced = os.environ.get("JVS_DEVICE")
+    if forced:
+        return forced
+    try:
+        import torch
 
-def _split_into_chunks(text: str, max_chars: int = _MAX_CHUNK_CHARS) -> list[str]:
-    """文末記号 (。！？改行) で区切り、長すぎる文は読点でさらに分割する。"""
-    pieces = [p.strip() for p in _SENT_BOUNDARY.split(text) if p.strip()]
-    chunks: list[str] = []
-    for piece in pieces:
-        if len(piece) <= max_chars:
-            chunks.append(piece)
-            continue
-        for sub in _SUB_BOUNDARY.split(piece):
-            sub = sub.strip()
-            if not sub:
-                continue
-            while len(sub) > max_chars:
-                chunks.append(sub[:max_chars])
-                sub = sub[max_chars:]
-            if sub:
-                chunks.append(sub)
-    return chunks
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:  # noqa: BLE001
+        pass
+    return "cpu"
 
 
 class JVSTextToSpeech:
-    """遅延初期化の TTS ラッパ。
-
-    ESPnet のロードは重いのでプロセスあたり 1 回だけ行う。
-    """
+    """遅延初期化の TTS ラッパ。"""
 
     def __init__(self, model_tag: str = _DEFAULT_MODEL_TAG) -> None:
         self.model_tag = model_tag
         self._tts = None
+        self._device = _resolve_device()
         self._lock = threading.Lock()
+
+    @property
+    def device(self) -> str:
+        return self._device
 
     def _ensure_loaded(self) -> None:
         if self._tts is not None:
@@ -75,6 +69,7 @@ class JVSTextToSpeech:
             model_files = downloader.download_and_unpack(self.model_tag)
             self._tts = Text2Speech.from_pretrained(
                 model_tag=self.model_tag,
+                device=self._device,
                 **model_files,
             )
 
@@ -84,12 +79,11 @@ class JVSTextToSpeech:
         return int(self._tts.fs)
 
     def synthesize(self, text: str) -> bytes:
-        """テキストから WAV バイト列を生成する。"""
         if not text.strip():
             raise ValueError("text is empty")
         self._ensure_loaded()
 
-        chunks = _split_into_chunks(text) or [text.strip()]
+        chunks = split_into_chunks(text, _MAX_CHUNK_CHARS) or [text.strip()]
         sr = self.sample_rate
         silence = np.zeros(int(sr * _CHUNK_SILENCE_SEC), dtype=np.float32)
 
