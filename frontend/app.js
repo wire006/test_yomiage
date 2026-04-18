@@ -32,7 +32,10 @@
   const DEFAULT_PREFS = {
     engine: "voicevox",
     voiceName: "冥鳴ひまり / ノーマル",
+    voiceId: null,
   };
+
+  const normalizeName = (s) => (s || "").replace(/\s+/g, "").toLowerCase();
 
   const loadPrefs = () => {
     try {
@@ -218,16 +221,18 @@
       const firstAvailable = engines.find((e) => e.available);
       const picked = saved || firstAvailable;
       if (picked) engineSelect.value = picked.id;
-      await onEngineChange();
+      await applyEngineSelection({ persist: !!saved });
     } catch (err) {
       setStatus(`エンジン一覧の取得に失敗: ${err.message}`);
     }
   };
 
-  const onEngineChange = async () => {
+  const applyEngineSelection = async ({ persist }) => {
     const id = engineSelect.value;
-    savePrefs({ engine: id });
-    prefs.engine = id;
+    if (persist) {
+      prefs.engine = id;
+      savePrefs({ engine: id });
+    }
     const e = engines.find((x) => x.id === id);
     voiceRow.hidden = !(e && e.has_voices);
     voiceSelect.innerHTML = "";
@@ -242,20 +247,33 @@
         opt.textContent = v.name;
         voiceSelect.appendChild(opt);
       }
-      const byName = prefs.voiceName
-        ? Array.from(voiceSelect.options).find((o) => o.textContent === prefs.voiceName)
-        : null;
-      if (byName) voiceSelect.value = byName.value;
+      const opts = Array.from(voiceSelect.options);
+      let matched = null;
+      if (prefs.voiceId !== null && prefs.voiceId !== undefined) {
+        matched = opts.find((o) => o.value === String(prefs.voiceId)) || null;
+      }
+      if (!matched && prefs.voiceName) {
+        const wanted = normalizeName(prefs.voiceName);
+        matched = opts.find((o) => normalizeName(o.textContent) === wanted) || null;
+      }
+      if (matched) {
+        voiceSelect.value = matched.value;
+      } else if (opts.length) {
+        voiceSelect.value = opts[0].value;
+      }
     } catch (err) {
       setStatus(`話者一覧の取得に失敗: ${err.message}`);
     }
   };
 
+  const onEngineChange = () => applyEngineSelection({ persist: true });
+
   const onVoiceChange = () => {
     const opt = voiceSelect.selectedOptions[0];
     if (!opt) return;
     prefs.voiceName = opt.textContent;
-    savePrefs({ voiceName: opt.textContent });
+    prefs.voiceId = opt.value;
+    savePrefs({ voiceName: opt.textContent, voiceId: opt.value });
   };
 
   const requestBody = () => {
