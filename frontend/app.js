@@ -13,9 +13,15 @@
   const durationEl = $("duration");
   const speedRange = $("speed-range");
   const speedLabel = $("speed-label");
+  const volumeRange = $("volume-range");
+  const volumeLabel = $("volume-label");
+  const muteBtn = $("mute-btn");
   const statusEl = $("status");
 
   let seeking = false;
+  let muted = false;
+  let audioCtx = null;
+  let gainNode = null;
 
   const formatTime = (sec) => {
     if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -40,6 +46,40 @@
     speedLabel.textContent = `${rate.toFixed(1)}x`;
     audio.playbackRate = rate;
     audio.defaultPlaybackRate = rate;
+  };
+
+  const ensureAudioGraph = () => {
+    if (audioCtx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      audioCtx = new AC();
+      const source = audioCtx.createMediaElementSource(audio);
+      gainNode = audioCtx.createGain();
+      source.connect(gainNode).connect(audioCtx.destination);
+    } catch {
+      audioCtx = null;
+      gainNode = null;
+    }
+  };
+
+  const applyVolume = () => {
+    const raw = Number(volumeRange.value);
+    const v = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 1;
+    const effective = muted ? 0 : v;
+    if (gainNode) {
+      gainNode.gain.value = effective;
+    } else {
+      audio.volume = effective;
+    }
+    volumeLabel.textContent = `${Math.round(v * 100)}%`;
+    muteBtn.textContent = muted ? "解除" : "ミュート";
+    muteBtn.setAttribute("aria-pressed", muted ? "true" : "false");
+  };
+
+  const toggleMute = () => {
+    muted = !muted;
+    applyVolume();
   };
 
   const fetchTextList = async () => {
@@ -119,6 +159,15 @@
       setStatus("まず「このテキストを読み込む」を押してください");
       return;
     }
+    ensureAudioGraph();
+    if (audioCtx && audioCtx.state === "suspended") {
+      try {
+        await audioCtx.resume();
+      } catch {
+        // ignore
+      }
+    }
+    applyVolume();
     if (audio.paused) {
       try {
         await audio.play();
@@ -152,6 +201,13 @@
 
   speedRange.addEventListener("input", applySpeed);
   speedRange.addEventListener("change", applySpeed);
+
+  volumeRange.addEventListener("input", () => {
+    if (muted && Number(volumeRange.value) > 0) muted = false;
+    applyVolume();
+  });
+  volumeRange.addEventListener("change", applyVolume);
+  muteBtn.addEventListener("click", toggleMute);
 
   audio.addEventListener("loadedmetadata", () => {
     seek.max = audio.duration.toString();
@@ -203,5 +259,6 @@
   seek.addEventListener("change", commitSeek);
 
   applySpeed();
+  applyVolume();
   fetchTextList();
 })();

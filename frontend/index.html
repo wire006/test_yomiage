@@ -73,6 +73,28 @@
             <span id="speed-label">1.0x</span>
           </div>
         </div>
+
+        <div class="volume">
+          <label for="volume-range">音量</label>
+          <div class="volume-row">
+            <button
+              id="mute-btn"
+              type="button"
+              aria-label="ミュート切替"
+              aria-pressed="false"
+            >ミュート</button>
+            <input
+              id="volume-range"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="1"
+              aria-label="音量"
+            />
+            <span id="volume-label">100%</span>
+          </div>
+        </div>
       </section>
 
       <audio id="audio" preload="auto" playsinline></audio>

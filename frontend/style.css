@@ -203,6 +203,47 @@ body {
   text-align: right;
 }
 
+.volume {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.volume label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.volume-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+#mute-btn {
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 72px;
+}
+
+#mute-btn[aria-pressed="true"] {
+  background: var(--danger);
+  color: #fff;
+}
+
+#volume-label {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 3.2em;
+  text-align: right;
+}
+
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
