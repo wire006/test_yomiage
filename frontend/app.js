@@ -29,6 +29,7 @@
   let muted = false;
   let audioCtx = null;
   let gainNode = null;
+  let renderedSpeed = 1.0;
 
   const PREFS_KEY = "yomiage.prefs.v1";
   const DEFAULT_PREFS = {
@@ -87,8 +88,12 @@
     const rate = clampSpeed(speedRange.value);
     speedRange.value = rate.toFixed(1);
     speedLabel.textContent = `${rate.toFixed(1)}x`;
-    audio.playbackRate = rate;
-    audio.defaultPlaybackRate = rate;
+    const compensated = rate / (renderedSpeed || 1);
+    audio.playbackRate = compensated;
+    audio.defaultPlaybackRate = compensated;
+    audio.preservesPitch = true;
+    if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
+    if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
   };
 
   const ensureAudioGraph = () => {
@@ -281,7 +286,8 @@
   const requestBody = () => {
     const text = textContent.value.trim();
     const speakerVal = voiceSelect.value ? Number(voiceSelect.value) : null;
-    const body = { text, engine: "voicevox" };
+    const speed = clampSpeed(speedRange.value);
+    const body = { text, engine: "voicevox", speed };
     if (speakerVal !== null && !Number.isNaN(speakerVal)) {
       body.speaker = speakerVal;
     }
@@ -315,6 +321,7 @@
       }
       audio.src = URL.createObjectURL(blob);
       audio.load();
+      renderedSpeed = body.speed;
       applySpeed();
       setStatus("準備完了。▶ で再生");
     } catch (err) {
@@ -515,6 +522,7 @@
       };
       renderStreamProgress();
       await loadChunkIntoAudio(0);
+      renderedSpeed = body.speed;
       applySpeed();
       try {
         await audio.play();
@@ -631,7 +639,7 @@
     playBtn.classList.remove("playing");
   });
   audio.addEventListener("ratechange", () => {
-    const rate = clampSpeed(audio.playbackRate);
+    const rate = clampSpeed(speedRange.value);
     speedLabel.textContent = `${rate.toFixed(1)}x`;
   });
 

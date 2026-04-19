@@ -31,6 +31,7 @@ _MAX_CHARS = 120
 class StreamSession:
     id: str
     speaker: int | None
+    speed: float
     chunks: list[str]
     dir: Path
     ready: list[bool] = field(default_factory=list)
@@ -74,7 +75,7 @@ class StreamSession:
     def _synth_chunk(self, text: str) -> bytes:
         from voicevox_engine import get_engine
 
-        return get_engine().synthesize(text, self.speaker or 1)
+        return get_engine().synthesize(text, self.speaker or 1, self.speed)
 
     def _run(self) -> None:
         try:
@@ -115,11 +116,12 @@ _sessions: dict[str, StreamSession] = {}
 _registry_lock = threading.Lock()
 
 
-def create_or_get(text: str, speaker: int | None) -> StreamSession:
+def create_or_get(text: str, speaker: int | None, speed: float = 1.0) -> StreamSession:
     text = text.strip()
     if not text:
         raise ValueError("empty text")
-    key_src = f"voicevox|{speaker}|{text}".encode("utf-8")
+    speed = round(float(speed), 1)
+    key_src = f"voicevox|{speaker}|{speed:.1f}|{text}".encode("utf-8")
     sid = hashlib.sha256(key_src).hexdigest()[:24]
 
     with _registry_lock:
@@ -134,6 +136,7 @@ def create_or_get(text: str, speaker: int | None) -> StreamSession:
         session = StreamSession(
             id=sid,
             speaker=speaker,
+            speed=speed,
             chunks=chunks,
             dir=sdir,
         )

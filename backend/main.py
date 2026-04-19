@@ -49,6 +49,7 @@ class SynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=50000)
     engine: str = "voicevox"
     speaker: int | None = None
+    speed: float = Field(1.0, ge=0.5, le=2.0)
 
 
 @app.get("/api/texts")
@@ -104,15 +105,16 @@ def synthesize(req: SynthesizeRequest) -> Response:
         raise HTTPException(status_code=400, detail="empty text")
 
     speaker = req.speaker
+    speed = round(req.speed, 1)
 
-    key_src = f"voicevox|{speaker}|{text}".encode("utf-8")
+    key_src = f"voicevox|{speaker}|{speed:.1f}|{text}".encode("utf-8")
     key = hashlib.sha256(key_src).hexdigest()
     cache_path = AUDIO_CACHE_DIR / f"{key}.wav"
     if cache_path.exists():
         return FileResponse(cache_path, media_type="audio/wav")
 
     try:
-        wav_bytes = get_voicevox_engine().synthesize(text, speaker or 1)
+        wav_bytes = get_voicevox_engine().synthesize(text, speaker or 1, speed)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -128,7 +130,7 @@ def stream_start(req: SynthesizeRequest) -> dict:
     if not text:
         raise HTTPException(status_code=400, detail="empty text")
     try:
-        session = stream.create_or_get(text, req.speaker)
+        session = stream.create_or_get(text, req.speaker, round(req.speed, 1))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

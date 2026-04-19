@@ -49,21 +49,20 @@ class VoicevoxEngine:
                 )
         return voices
 
-    def _synth_one(self, text: str, speaker: int) -> tuple[np.ndarray, int]:
+    def _synth_one(self, text: str, speaker: int, speed: float = 1.0) -> tuple[np.ndarray, int]:
         q = requests.post(
             f"{self.url}/audio_query",
             params={"text": text, "speaker": speaker},
             timeout=_TIMEOUT,
         )
         q.raise_for_status()
+        query = q.json()
+        query["speedScale"] = float(speed)
         syn = requests.post(
             f"{self.url}/synthesis",
             params={"speaker": speaker},
-            data=q.content,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "audio/wav",
-            },
+            json=query,
+            headers={"Accept": "audio/wav"},
             timeout=_TIMEOUT,
         )
         syn.raise_for_status()
@@ -72,7 +71,7 @@ class VoicevoxEngine:
             wav = wav.mean(axis=1)
         return wav.astype(np.float32), int(sr)
 
-    def synthesize(self, text: str, speaker: int = 1) -> bytes:
+    def synthesize(self, text: str, speaker: int = 1, speed: float = 1.0) -> bytes:
         if not text.strip():
             raise ValueError("text is empty")
 
@@ -80,7 +79,7 @@ class VoicevoxEngine:
         wavs: list[np.ndarray] = []
         sr_ref: int | None = None
         for i, chunk in enumerate(chunks):
-            wav, sr = self._synth_one(chunk, speaker)
+            wav, sr = self._synth_one(chunk, speaker, speed)
             if sr_ref is None:
                 sr_ref = sr
             wavs.append(wav)
