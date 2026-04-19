@@ -319,9 +319,9 @@
       if (audio.src && audio.src.startsWith("blob:")) {
         URL.revokeObjectURL(audio.src);
       }
+      renderedSpeed = body.speed;
       audio.src = URL.createObjectURL(blob);
       audio.load();
-      renderedSpeed = body.speed;
       applySpeed();
       setStatus("準備完了。▶ で再生");
     } catch (err) {
@@ -521,8 +521,8 @@
         preloadedIdx: -1,
       };
       renderStreamProgress();
-      await loadChunkIntoAudio(0);
       renderedSpeed = body.speed;
+      await loadChunkIntoAudio(0);
       applySpeed();
       try {
         await audio.play();
